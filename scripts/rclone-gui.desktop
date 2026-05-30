@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Google Drive Sync
+Comment=Pull, push and bisync Google Drive folders with rclone
+Exec=python3 ~/rclone-gui.py
+Icon=folder-cloud
+Terminal=false
+Categories=Utility;Network;FileTransfer;
