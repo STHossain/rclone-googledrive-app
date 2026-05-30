@@ -1,31 +1,44 @@
 #!/bin/bash
 
 # ─── rclone-sync.sh ───────────────────────────────────
-# Push/Pull/Bisync for all tracked Google Drive folders
+# Push/Pull/Bisync for all tracked Google Drive folders.
+# Multi-account aware. Tracking file lines:
+#     remote|type|name      (3-field, current)
+#     type|name             (2-field, old — assumed remote=gdrive2)
 # ──────────────────────────────────────────────────────
 
-REMOTE="gdrive2"
+DEFAULT_REMOTE="gdrive2"
 LOCAL_BASE="$HOME/GoogleDrive"
 CONFIG_FILE="$HOME/.rclone-folders"
 LOG_FILE="/tmp/rclone-bisync.log"
 
-# Check config file exists
 if [ ! -f "$CONFIG_FILE" ] || [ ! -s "$CONFIG_FILE" ]; then
   echo "No folders tracked yet."
   echo "Add a folder with: ~/rclone-add.sh \"Folder Name\""
   exit 1
 fi
 
-# Load folders from config
 mapfile -t ENTRIES < "$CONFIG_FILE"
+
+# Parse a tracking line into REMOTE / TYPE / NAME (handles both formats)
+parse_entry() {
+  local line="$1"
+  local f1 f2 rest
+  IFS='|' read -r f1 f2 rest <<< "$line"
+  if [ -n "$rest" ]; then
+    REMOTE="$f1"; TYPE="$f2"; NAME="$rest"
+  else
+    REMOTE="$DEFAULT_REMOTE"; TYPE="$f1"; NAME="$f2"
+  fi
+}
 
 echo "================================"
 echo " Rclone Sync"
 echo "================================"
 echo "Tracked folders:"
 for i in "${!ENTRIES[@]}"; do
-  IFS='|' read -r type name <<< "${ENTRIES[$i]}"
-  echo "  $((i+1))) $name [$type]"
+  parse_entry "${ENTRIES[$i]}"
+  echo "  $((i+1))) $NAME  [$REMOTE · $TYPE]"
 done
 echo "  A) All folders"
 echo "================================"
@@ -39,11 +52,11 @@ echo "  3) Bisync (Two-way)"
 echo "================================"
 read -p "Choose action [1/2/3]: " action
 
-# Function to sync one folder
 sync_folder() {
-  local type="$1"
-  local name="$2"
-  local action="$3"
+  local remote="$1"
+  local type="$2"
+  local name="$3"
+  local action="$4"
   local local_folder="$LOCAL_BASE/$name"
 
   if [[ "$type" == "shared" ]]; then
@@ -53,36 +66,25 @@ sync_folder() {
   fi
 
   echo ""
-  echo "[$(date)] ── $name ──"
+  echo "[$(date)] ── $name  [$remote] ──"
 
   case $action in
     1)
       echo "Pulling from Drive..."
-      rclone copy "$REMOTE:$name" "$local_folder" \
-        $SHARED_FLAG \
-        --log-file "$LOG_FILE" \
-        --log-level INFO \
-        --verbose \
-        --progress
+      rclone copy "$remote:$name" "$local_folder" \
+        $SHARED_FLAG --log-file "$LOG_FILE" --log-level INFO --verbose --progress
       echo "[$(date)] Pull complete!"
       ;;
     2)
       echo "Pushing to Drive..."
-      rclone copy "$local_folder" "$REMOTE:$name" \
-        $SHARED_FLAG \
-        --log-file "$LOG_FILE" \
-        --log-level INFO \
-        --verbose \
-        --progress
+      rclone copy "$local_folder" "$remote:$name" \
+        $SHARED_FLAG --log-file "$LOG_FILE" --log-level INFO --verbose --progress
       echo "[$(date)] Push complete!"
       ;;
     3)
       echo "Running bisync..."
-      rclone bisync "$REMOTE:$name" "$local_folder" \
-        $SHARED_FLAG \
-        --log-file "$LOG_FILE" \
-        --log-level INFO \
-        --verbose
+      rclone bisync "$remote:$name" "$local_folder" \
+        $SHARED_FLAG --log-file "$LOG_FILE" --log-level INFO --verbose
       echo "[$(date)] Bisync complete!"
       ;;
     *)
@@ -91,11 +93,10 @@ sync_folder() {
   esac
 }
 
-# Run for selected folder(s)
 if [[ "$folder_choice" == "A" || "$folder_choice" == "a" ]]; then
   for entry in "${ENTRIES[@]}"; do
-    IFS='|' read -r type name <<< "$entry"
-    sync_folder "$type" "$name" "$action"
+    parse_entry "$entry"
+    sync_folder "$REMOTE" "$TYPE" "$NAME" "$action"
   done
 else
   INDEX=$((folder_choice - 1))
@@ -103,8 +104,8 @@ else
     echo "Invalid choice."
     exit 1
   fi
-  IFS='|' read -r type name <<< "${ENTRIES[$INDEX]}"
-  sync_folder "$type" "$name" "$action"
+  parse_entry "${ENTRIES[$INDEX]}"
+  sync_folder "$REMOTE" "$TYPE" "$NAME" "$action"
 fi
 
 echo ""
